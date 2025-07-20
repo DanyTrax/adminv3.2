@@ -1,0 +1,299 @@
+<?php
+
+require_once "conexion.php";
+
+class ModeloContabilidad
+{
+    private const TABLA = 'contabilidad';
+
+    /*=============================================
+GUARDAR MOVIMIENTO (GASTO O ENTRADA) - FUNCIÓN CORREGIDA
+=============================================*/
+public static function save($datos) {
+
+    // Se construye la lista de columnas y placeholders dinámicamente
+    // Esto hace que la función sea flexible para guardar tanto gastos como entradas
+    $columnas = implode(", ", array_keys($datos));
+    $placeholders = ":" . implode(", :", array_keys($datos));
+
+    $sql = "INSERT INTO " . self::TABLA . " ($columnas) VALUES ($placeholders)";
+    
+    $stmt = Conexion::conectar()->prepare($sql);
+
+    // Se vinculan todos los datos que llegaron desde el controlador
+    foreach ($datos as $key => &$val) {
+        $stmt->bindParam(":" . $key, $val);
+    }
+
+    if ($stmt->execute()) {
+        return "ok";
+    } else {
+        return "error";
+    }
+}
+
+    public static function filterBy($fechaInicial, $fechaFinal, $medioPago, $tipo)
+{
+    // 1. La consulta base ahora une las tablas para obtener el nombre del vendedor
+    $sql = "SELECT cont.*, u.nombre AS nombre_vendedor
+            FROM " . self::TABLA . " cont
+            INNER JOIN usuarios u ON cont.id_vendedor = u.id";
+
+    // 2. Se usan arrays para construir la consulta de forma segura
+    $conditions = [];
+    $params = [];
+
+    // Siempre se filtra por tipo (Gasto, Entrada, etc.)
+    $conditions[] = "cont.tipo = :tipo";
+    $params[':tipo'] = $tipo;
+
+    // Se añaden los filtros opcionales de forma segura
+    if ($fechaInicial != null && $fechaFinal != null) {
+        $conditions[] = "cont.fecha BETWEEN :fechaInicial AND :fechaFinal";
+        $params[':fechaInicial'] = $fechaInicial . " 00:00:00";
+        $params[':fechaFinal'] = $fechaFinal . " 23:59:59";
+    }
+
+    if ($medioPago != null) {
+        $conditions[] = "cont.medio_pago = :medioPago";
+        $params[':medioPago'] = $medioPago;
+    }
+
+    // 3. Se añaden las condiciones a la consulta
+    $sql .= " WHERE " . implode(" AND ", $conditions);
+    $sql .= " ORDER BY cont.id DESC";
+
+    $stmt = Conexion::conectar()->prepare($sql);
+
+    // 4. Se ejecuta la consulta con los parámetros, previniendo inyección SQL
+    $stmt->execute($params);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+    public static function findById($id)
+    {
+        $sql = "SELECT * FROM " . self::TABLA . " WHERE id = '$id'";
+        $stmt = Conexion::conectar()->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetch();
+    }
+
+    public static function update($id, $datos)
+    {
+        $columns = '';
+        foreach ($datos as $key => $value) {
+            $columns .= $key . "='" . $value . "',";
+        }
+        $columns = substr($columns, 0, -1);
+        $sql = "UPDATE " . self::TABLA . " SET $columns WHERE id = :id";
+
+        $stmt = Conexion::conectar()->prepare($sql);
+        $stmt->bindParam(":id", $id, PDO::PARAM_INT);
+
+        if ($stmt->execute()) {
+            return "ok";
+        } else {
+            return "error";
+        }
+    }
+
+    public static function delete($id)
+    {
+        $sql = "DELETE FROM " . self::TABLA . " WHERE id = :id";
+        $stmt = Conexion::conectar()->prepare($sql);
+        $stmt->bindParam(":id", $id, PDO::PARAM_INT);
+
+        if ($stmt->execute()) {
+            return "ok";
+        } else {
+            return "error";
+        }
+    }
+
+    public static function sumByTipo($tipo)
+    {
+        $dataInicial = date('Y-m-d 00:00:00');
+        $dataFinal = date('Y-m-d 23:59:59');
+
+        $sql = "SELECT SUM(valor) AS total FROM " . self::TABLA . " WHERE tipo = '$tipo' AND fecha BETWEEN '$dataInicial' AND '$dataFinal'";
+        $stmt = Conexion::conectar()->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetch();
+    }
+
+    public static function sumByTipoAndMedio($tipo, $medioPago)
+    {
+        $dataInicial = date('Y-m-d 00:00:00');
+        $dataFinal = date('Y-m-d 23:59:59');
+
+        $sql = "SELECT SUM(valor) AS total FROM " . self::TABLA . " WHERE tipo = '$tipo' AND medio_pago = '$medioPago' AND fecha BETWEEN '$dataInicial' AND '$dataFinal'";
+        $stmt = Conexion::conectar()->prepare($sql);
+        $stmt->execute();
+        return $stmt->fetch();
+    }
+/*=============================================
+SUMAR ENTRADAS POR MEDIO DE PAGO (CORREGIDO)
+=============================================*/
+static public function mdlSumaEntradasPorMedioPago($tabla, $fechaInicial, $fechaFinal){
+
+    $sql_base = "SELECT medio_pago, SUM(valor) as total_entradas FROM $tabla WHERE tipo = 'Entrada'";
+    $sql_end = " GROUP BY medio_pago";
+
+    if($fechaInicial == null){
+        $stmt = Conexion::conectar()->prepare($sql_base . $sql_end);
+    } else {
+        // CORRECCIÓN: Se añade el filtro de fecha a la consulta
+        $stmt = Conexion::conectar()->prepare($sql_base . " AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal" . $sql_end);
+        $stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
+        $stmt->bindParam(":fechaFinal", $fechaFinal, PDO::PARAM_STR);
+    }
+
+    $stmt -> execute();
+    return $stmt -> fetchAll();
+}
+/*=============================================
+SUMAR TOTAL DE GASTOS (CORREGIDO)
+=============================================*/
+static public function mdlSumaTotalGastos($tabla, $fechaInicial, $fechaFinal){
+
+    $sql_base = "SELECT SUM(valor) as total FROM $tabla WHERE tipo = 'Gasto'";
+    
+    if($fechaInicial == null){
+        $stmt = Conexion::conectar()->prepare($sql_base);
+    } else {
+        // Se añade el filtro de fecha a la consulta de suma
+        $stmt = Conexion::conectar()->prepare($sql_base . " AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal");
+        $stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
+        $stmt->bindParam(":fechaFinal", $fechaFinal, PDO::PARAM_STR);
+    }
+
+    $stmt -> execute();
+    return $stmt -> fetch();
+}
+
+	/*=============================================
+	SUMAR TOTAL POR TIPO Y MEDIO DE PAGO (CORREGIDO)
+	=============================================*/
+	static public function mdlSumaTotalPorTipoYMedio($tabla, $tipo, $medioPago, $fechaInicial, $fechaFinal){
+		$sql_base = "SELECT SUM(valor) as total FROM $tabla WHERE tipo = :tipo AND medio_pago = :medio_pago";
+		if($fechaInicial == null){
+			$stmt = Conexion::conectar()->prepare($sql_base);
+			$stmt->bindParam(":tipo", $tipo, PDO::PARAM_STR);
+			$stmt->bindParam(":medio_pago", $medioPago, PDO::PARAM_STR);
+		}else{
+			$stmt = Conexion::conectar()->prepare($sql_base . " AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal");
+			$stmt->bindParam(":tipo", $tipo, PDO::PARAM_STR);
+			$stmt->bindParam(":medio_pago", $medioPago, PDO::PARAM_STR);
+			$stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
+			$stmt->bindParam(":fechaFinal", $fechaFinal, PDO::PARAM_STR);
+		}
+		$stmt -> execute();
+		return $stmt -> fetch();
+	}
+
+
+	/*=============================================
+	SUMAR GASTOS POR MEDIO DE PAGO (CORREGIDO)
+	=============================================*/
+	static public function mdlSumaGastosPorMedioPago($tabla, $fechaInicial, $fechaFinal){
+		$sql_base = "SELECT medio_pago, SUM(valor) as total_gastos FROM $tabla WHERE tipo = 'Gasto' GROUP BY medio_pago";
+		if($fechaInicial == null){
+			$stmt = Conexion::conectar()->prepare($sql_base);
+		}else{
+			$stmt = Conexion::conectar()->prepare("SELECT medio_pago, SUM(valor) as total_gastos FROM $tabla WHERE tipo = 'Gasto' AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal GROUP BY medio_pago");
+			$stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
+			$stmt->bindParam(":fechaFinal", $fechaFinal, PDO::PARAM_STR);
+		}
+		$stmt -> execute();
+		return $stmt -> fetchAll();
+	}
+	/*=============================================
+	SUMAR TOTAL DE ENTRADAS (CORREGIDO)
+	=============================================*/
+	static public function mdlSumaTotalEntradas($tabla, $fechaInicial, $fechaFinal){
+		$sql_base = "SELECT SUM(valor) as total FROM $tabla WHERE tipo = 'Entrada'";
+		if($fechaInicial == null){
+			$stmt = Conexion::conectar()->prepare($sql_base);
+		} else {
+			// Se usa DATE() para ignorar la hora
+			$stmt = Conexion::conectar()->prepare($sql_base . " AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal");
+			$stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
+			$stmt->bindParam(":fechaFinal", $fechaFinal, PDO::PARAM_STR);
+		}
+		$stmt -> execute();
+		return $stmt -> fetch();
+	}
+    /*=============================================
+    FILTRAR ENTRADAS/GASTOS (FUNCIÓN CORREGIDA)
+    =============================================*/
+    // Asegúrate de que esta es la función que usa tu tabla de Entradas.
+    // Si tiene otro nombre, como mdlMostrarEntradas, reemplaza esa.
+    static public function mdlFilterContabilidad($tabla, $fechaInicial, $fechaFinal, $medioPago, $tipo) {
+        
+        $sql = "SELECT * FROM $tabla WHERE 1=1";
+        $params = [];
+    
+        if ($tipo != null) {
+            $sql .= " AND tipo = :tipo";
+            $params[":tipo"] = $tipo;
+        }
+    
+        if ($fechaInicial != null && $fechaFinal != null) {
+            // CAMBIO CLAVE: Se usa DATE() para comparar solo la fecha
+            $sql .= " AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal";
+            $params[":fechaInicial"] = $fechaInicial;
+            $params[":fechaFinal"] = $fechaFinal;
+        }
+    
+        if ($medioPago != null) {
+            $sql .= " AND medio_pago = :medioPago";
+            $params[":medioPago"] = $medioPago;
+        }
+    
+        $stmt = Conexion::conectar()->prepare("$sql ORDER BY id DESC");
+    
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value);
+        }
+    
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+/*=============================================
+FILTRAR MOVIMIENTOS (VERSIÓN FINAL)
+=============================================*/
+public static function mdlFilterBy($tabla, $fechaInicial, $fechaFinal, $medioPago, $tipo) {
+    
+    $sql = "SELECT * FROM $tabla WHERE 1=1";
+    $params = [];
+
+    if ($tipo != null) {
+        $sql .= " AND tipo = :tipo";
+        $params[":tipo"] = $tipo;
+    }
+
+    // LÓGICA DE FECHA CORREGIDA
+    if ($fechaInicial != null && $fechaFinal != null) {
+        // Se usa DATE() para ignorar la hora
+        $sql .= " AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal";
+        $params[":fechaInicial"] = $fechaInicial;
+        $params[":fechaFinal"] = $fechaFinal;
+    }
+
+    if ($medioPago != null) {
+        $sql .= " AND medio_pago = :medioPago";
+        $params[":medioPago"] = $medioPago;
+    }
+
+    $stmt = Conexion::conectar()->prepare("$sql ORDER BY id DESC");
+
+    foreach ($params as $key => $value) {
+        $stmt->bindValue($key, $value);
+    }
+
+    $stmt->execute();
+    return $stmt->fetchAll();
+}
+    
+}
