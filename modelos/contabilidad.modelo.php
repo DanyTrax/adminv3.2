@@ -132,26 +132,28 @@ public static function save($datos) {
         $stmt->execute();
         return $stmt->fetch();
     }
-/*=============================================
-SUMAR ENTRADAS POR MEDIO DE PAGO (CORREGIDO)
-=============================================*/
-static public function mdlSumaEntradasPorMedioPago($tabla, $fechaInicial, $fechaFinal){
-
-    $sql_base = "SELECT medio_pago, SUM(valor) as total_entradas FROM $tabla WHERE tipo = 'Entrada'";
-    $sql_end = " GROUP BY medio_pago";
-
-    if($fechaInicial == null){
-        $stmt = Conexion::conectar()->prepare($sql_base . $sql_end);
-    } else {
-        // CORRECCIÓN: Se añade el filtro de fecha a la consulta
-        $stmt = Conexion::conectar()->prepare($sql_base . " AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal" . $sql_end);
-        $stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
-        $stmt->bindParam(":fechaFinal", $fechaFinal, PDO::PARAM_STR);
+    /*=============================================
+    SUMA ENTRADAS POR MEDIO DE PAGO (CORREGIDO)
+    =============================================*/
+    static public function mdlSumaEntradasPorMedioPago($tabla, $fechaInicial, $fechaFinal){
+    
+    	if($fechaInicial == null){
+    
+    		$stmt = Conexion::conectar()->prepare("SELECT medio_pago, SUM(valor) as total_entradas FROM $tabla WHERE tipo = 'Entrada' GROUP BY medio_pago");
+    	
+    	}else{
+    
+    		$fechaFinalConHora = $fechaFinal . ' 23:59:59';
+    		$stmt = Conexion::conectar()->prepare("SELECT medio_pago, SUM(valor) as total_entradas FROM $tabla WHERE tipo = 'Entrada' AND fecha BETWEEN :fechaInicial AND :fechaFinal GROUP BY medio_pago");
+    		$stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
+    		$stmt->bindParam(":fechaFinal", $fechaFinalConHora, PDO::PARAM_STR);
+    	
+    	}
+    	
+    	$stmt -> execute();
+    	return $stmt -> fetchAll();
+    
     }
-
-    $stmt -> execute();
-    return $stmt -> fetchAll();
-}
 /*=============================================
 SUMAR TOTAL DE GASTOS (CORREGIDO)
 =============================================*/
@@ -208,22 +210,30 @@ static public function mdlSumaTotalGastos($tabla, $fechaInicial, $fechaFinal){
 		$stmt -> execute();
 		return $stmt -> fetchAll();
 	}
-	/*=============================================
-	SUMAR TOTAL DE ENTRADAS (CORREGIDO)
-	=============================================*/
-	static public function mdlSumaTotalEntradas($tabla, $fechaInicial, $fechaFinal){
-		$sql_base = "SELECT SUM(valor) as total FROM $tabla WHERE tipo = 'Entrada'";
-		if($fechaInicial == null){
-			$stmt = Conexion::conectar()->prepare($sql_base);
-		} else {
-			// Se usa DATE() para ignorar la hora
-			$stmt = Conexion::conectar()->prepare($sql_base . " AND DATE(fecha) BETWEEN :fechaInicial AND :fechaFinal");
-			$stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
-			$stmt->bindParam(":fechaFinal", $fechaFinal, PDO::PARAM_STR);
-		}
-		$stmt -> execute();
-		return $stmt -> fetch();
-	}
+    /*=============================================
+    SUMA TOTAL DE ENTRADAS (CORREGIDO)
+    =============================================*/
+    static public function mdlSumaTotalEntradas($tabla, $fechaInicial, $fechaFinal){
+    
+    	// El nombre de la columna de fecha puede ser 'fecha' o 'fecha_creacion'
+    	// Ajusta 'fecha' si tu columna se llama diferente.
+    	if($fechaInicial == null){
+    
+    		$stmt = Conexion::conectar()->prepare("SELECT SUM(valor) as total FROM $tabla WHERE tipo = 'Entrada'");
+    
+    	}else{
+            // Añadimos la hora final para cubrir el día completo
+    		$fechaFinalConHora = $fechaFinal . ' 23:59:59';
+    		$stmt = Conexion::conectar()->prepare("SELECT SUM(valor) as total FROM $tabla WHERE tipo = 'Entrada' AND fecha BETWEEN :fechaInicial AND :fechaFinal");
+    		$stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
+    		$stmt->bindParam(":fechaFinal", $fechaFinalConHora, PDO::PARAM_STR);
+    
+    	}
+    
+    	$stmt -> execute();
+    	return $stmt -> fetch();
+    
+    }
     /*=============================================
     FILTRAR ENTRADAS/GASTOS (FUNCIÓN CORREGIDA)
     =============================================*/

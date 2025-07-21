@@ -84,17 +84,52 @@ class ModeloVentas {
 		if($stmt->execute()){ return "ok"; }else{ return "error"; }
 	}
 
-	/*=============================================
-	ELIMINAR VENTA (SIN CAMBIOS)
-	=============================================*/
-	static public function mdlEliminarVenta($tabla, $datos) {
-		$stmt = Conexion::conectar()->prepare("DELETE FROM $tabla WHERE id = :id");
-		$stmt->bindParam(":id", $datos, PDO::PARAM_INT);
-		if ($stmt->execute()) { return "ok"; } else { return "error"; }
-		$stmt->close();
-		$stmt = null;
-	}
+/*=============================================
+ELIMINAR VENTA COMPLETA (VERSIÓN FINAL)
+=============================================*/
+static public function mdlEliminarVenta($tabla, $datos){
 
+	$idVenta = $datos;
+	$db = Conexion::conectar();
+
+	$db->beginTransaction();
+
+	try {
+		$stmt = $db->prepare("SELECT codigo FROM $tabla WHERE id = :id");
+		$stmt->bindParam(":id", $idVenta, PDO::PARAM_INT);
+		$stmt->execute();
+		$venta = $stmt->fetch();
+		$codigoFactura = $venta['codigo'];
+
+		$stmt = $db->prepare("DELETE FROM venta_productos WHERE id_venta = :id_venta");
+		$stmt->bindParam(":id_venta", $idVenta, PDO::PARAM_INT);
+		$stmt->execute();
+
+		if ($codigoFactura) {
+			
+			// --- CORRECCIÓN FINAL AQUÍ ---
+			// La columna se llama 'factura', no 'codigo_factura'.
+			$stmt = $db->prepare("DELETE FROM contabilidad WHERE factura = :factura AND tipo = 'Entrada'");
+			$stmt->bindParam(":factura", $codigoFactura, PDO::PARAM_STR);
+			$stmt->execute();
+
+		}
+
+		$stmt = $db->prepare("DELETE FROM $tabla WHERE id = :id");
+		$stmt->bindParam(":id", $idVenta, PDO::PARAM_INT);
+		$stmt->execute();
+
+		$db->commit();
+		return "ok";
+
+	} catch (Exception $e) {
+		$db->rollBack();
+		// Devolvemos el mensaje de error para saber qué pasó
+		return "Error de base de datos: " . $e->getMessage();
+	}
+	
+	$stmt = null;
+}
 	/*=============================================
 	RANGO FECHAS (UNIFICADO Y CORREGIDO)
 	=============================================*/
@@ -270,19 +305,32 @@ class ModeloVentas {
 	}
 
     
-	/*=============================================
-	SUMAR TOTAL DE VENTAS (GENERAL) (CORREGIDO)
-	=============================================*/
-	static public function mdlSumaTotalVentasGeneral($tabla, $fechaInicial, $fechaFinal){
-		$sql_base = "SELECT SUM(total) as total_ventas FROM $tabla";
-		if($fechaInicial == null){
-			$stmt = Conexion::conectar()->prepare($sql_base);
-		} else {
-			$stmt = Conexion::conectar()->prepare($sql_base . " WHERE DATE(fecha_venta) BETWEEN :fechaInicial AND :fechaFinal");
-			$stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
-			$stmt->bindParam(":fechaFinal", $fechaFinal, PDO::PARAM_STR);
-		}
+/*=============================================
+SUMAR TOTAL DE VENTAS (GENERAL) (CORREGIDO)
+=============================================*/
+static public function mdlSumaTotalVentasGeneral($tabla, $fechaInicial, $fechaFinal){
+
+	if($fechaInicial == null){
+
+		$stmt = Conexion::conectar()->prepare("SELECT SUM(total) as total_ventas FROM $tabla");
+		$stmt -> execute();
+		return $stmt -> fetch();
+
+	} else {
+		
+		// Corregimos el rango de fechas para que incluya todo el día
+		$fechaFinalConHora = $fechaFinal . ' 23:59:59';
+
+		$stmt = Conexion::conectar()->prepare("SELECT SUM(total) as total_ventas FROM $tabla WHERE fecha_venta BETWEEN :fechaInicial AND :fechaFinal");
+		
+		$stmt->bindParam(":fechaInicial", $fechaInicial, PDO::PARAM_STR);
+		$stmt->bindParam(":fechaFinal", $fechaFinalConHora, PDO::PARAM_STR);
+
 		$stmt -> execute();
 		return $stmt -> fetch();
 	}
+
+	$stmt -> close();
+	$stmt = null;
+}
 }

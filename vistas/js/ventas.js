@@ -345,17 +345,13 @@ $(document).on("change", "#nuevoMetodoPago", function() {
 		<div class="input-group">
 			<select class="form-control" id="nuevoMedioPago" name="nuevoMedioPago" required>
 				<option value="">Seleccione medio de pago</option>
-				<option value="Nequi">Nequi</option>
-				<option value="DaviPlata">DaviPlata</option>
-				<option value="Bancolombia Infinito">Bancolombia Infinito</option>
-				<option value="Bancolombia Personal">Bancolombia Personal</option>
-				<option value="Davivienda Infinito">Davivienda Infinito</option>
-				<option value="Davivienda Personal">Davivienda Personal</option>
-				<option value="Efectivo">Efectivo</option>
-				<option value="Efectivo Lenin">Efectivo Lenin</option>
-				<option value="Efectivo Marcela">Efectivo Marcela</option>
-				<option value="Tarjeta de Crédito">Tarjeta de Crédito</option>
-				<option value="Datafono">Datafono</option>
+				<option value="EFECTIVO">EFECTIVO</option>
+				<option value="DAVIVIENDA AC PLASTICOS">DAVIVIENDA AC PLASTICOS</option>
+				<option value="DAVIVIENDA LENIN">DAVIVIENDA LENIN</option>
+				<option value="BANCOLOMBIA MARCELA">BANCOLOMBIA MARCELA</option>
+				<option value="NEQUI">NEQUI</option>
+				<option value="DAVIPLATA">DAVIPLATA</option>
+				<option value="DATAFONO">DATAFONO</option>
 			</select>
 		</div>
 	`;
@@ -476,22 +472,53 @@ $('.tablaVentas').on('draw.dt', function() {
 });
 
 /*=============================================
-BORRAR Venta
+BORRAR Venta (CORREGIDO CON AJAX)
 =============================================*/
-$(".tablas").on("click", ".btnEliminarVenta", function() {
+$(".tablas").on("click", ".btnEliminarVenta", function(){
+
 	var idVenta = $(this).attr("idVenta");
+
 	swal({
 		title: '¿Está seguro de borrar la venta?',
-		text: "¡Si no lo está puede cancelar la accíón!",
+		text: "¡Si no lo está puede cancelar la acción!",
 		type: 'warning',
 		showCancelButton: true,
 		confirmButtonColor: '#3085d6',
 		cancelButtonColor: '#d33',
 		cancelButtonText: 'Cancelar',
-		confirmButtonText: 'Si, borrar venta!'
-	}).then(function(result) {
+		confirmButtonText: '¡Sí, borrar venta!'
+	}).then(function(result){
 		if (result.value) {
-			window.location = "index.php?ruta=ventas&idVenta=" + idVenta;
+			
+			// Creamos los datos que se enviarán al servidor
+			var datos = new FormData();
+            datos.append("idVentaBorrar", idVenta);
+
+			// Hacemos la llamada AJAX para borrar en segundo plano
+            $.ajax({
+                url: "ajax/ventas.ajax.php",
+                method: "POST",
+                data: datos,
+                cache: false,
+                contentType: false,
+                processData: false,
+                success: function(respuesta){
+					// Si el servidor responde "ok", mostramos la alerta de éxito
+					// y recargamos la página para ver el cambio
+                    if(respuesta == "ok"){
+                        swal({
+                            type: "success",
+                            title: "La venta ha sido borrada correctamente",
+                            showConfirmButton: true,
+                            confirmButtonText: "Cerrar"
+                        }).then(function(result){
+                            if(result.value){
+                                window.location = "ventas";
+                            }
+                        });
+                    }
+                }
+            });
 		}
 	})
 });

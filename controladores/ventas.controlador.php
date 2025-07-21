@@ -1,6 +1,8 @@
 <?php
 
 require_once __DIR__ . "/../src/Utils.php";
+require_once __DIR__ . "/../modelos/productos.modelo.php";
+require_once __DIR__ . "/../modelos/clientes.modelo.php";
 
 class ControladorVentas {
 
@@ -234,31 +236,88 @@ static public function ctrCrearVenta() {
         }
     }
 
-    /*=============================================
-    ELIMINAR VENTA
-    =============================================*/
-    static public function ctrEliminarVenta() {
-        if (!isset($_GET["idVenta"])) return;
-        $venta = ModeloVentas::mdlMostrarVentas("ventas", "id", $_GET["idVenta"]);
-        $idCliente = $venta["id_cliente"];
-        $productos = json_decode($venta["productos"], true);
+/*=============================================
+LÓGICA PRIVADA PARA REVERTIR CAMBIOS DE VENTA (VERSIÓN FINAL)
+=============================================*/
+private static function _revertirCambiosVenta($idVenta){
+
+    $venta = ModeloVentas::mdlMostrarVentas("ventas", "id", $idVenta);
+    if(!$venta){ return false; }
+
+    $idCliente = $venta["id_cliente"];
+    $productos = json_decode($venta["productos"], true);
+
+    // 1. Revertir stock
+    if (is_array($productos)) {
         foreach ($productos as $item) {
-            $producto = ModeloProductos::mdlMostrarProductos("productos", "id", $item["id"], "id");
-            ModeloProductos::mdlActualizarCampo("productos", "ventas", $producto["ventas"] - $item["cantidad"], $item["id"]);
-            ModeloProductos::mdlActualizarCampo("productos", "stock", $producto["stock"] + $item["cantidad"], $item["id"]);
-        }
-        $totalComprado = array_sum(array_column($productos, "cantidad"));
-        $cliente = ModeloClientes::mdlMostrarClientes("clientes", "id", $idCliente);
-        ModeloClientes::mdlActualizarCliente("clientes", "compras", $cliente["compras"] - $totalComprado, $idCliente);
-        $ventasCliente = array_filter(ModeloVentas::mdlMostrarVentas("ventas", null, null), fn($v) => $v["id_cliente"] == $idCliente);
-        $fechas = array_column($ventasCliente, "fecha");
-        rsort($fechas);
-        $ultimaFecha = $fechas[1] ?? "0000-00-00 00:00:00";
-        ModeloClientes::mdlActualizarCliente("clientes", "ultima_compra", $ultimaFecha, $idCliente);
-        if (ModeloVentas::mdlEliminarVenta("ventas", $_GET["idVenta"]) === "ok") {
-            self::mostrarAlerta("success", "La venta ha sido borrada correctamente", "ventas");
+            if(isset($item["id"]) && $item["id"] != "libre"){
+                $producto = ModeloProductos::mdlMostrarProductos("productos", "id", $item["id"], "id");
+                if($producto){
+                    ModeloProductos::mdlActualizarCampo("productos", "ventas", $producto["ventas"] - $item["cantidad"], $item["id"]);
+                    ModeloProductos::mdlActualizarCampo("productos", "stock", $producto["stock"] + $item["cantidad"], $item["id"]);
+                }
+            }
         }
     }
+
+    // 2. Actualizar cliente
+    $cliente = ModeloClientes::mdlMostrarClientes("clientes", "id", $idCliente);
+    if($cliente && is_array($productos)){
+        $totalCompradoEnVenta = array_sum(array_column($productos, "cantidad"));
+        ModeloClientes::mdlActualizarCliente("clientes", "compras", $cliente["compras"] - $totalCompradoEnVenta, $idCliente);
+
+        // Recalcular la última compra de forma segura
+        $ventasCliente = ModeloVentas::mdlMostrarVentas("ventas", "id_cliente", $idCliente);
+        $ultimaFecha = "0000-00-00 00:00:00"; 
+
+        if (is_array($ventasCliente) && count($ventasCliente) > 1) {
+            $otrasVentas = array_filter($ventasCliente, function($v) use ($idVenta) {
+                return is_array($v) && $v['id'] != $idVenta;
+            });
+            if(!empty($otrasVentas)){
+                $fechas = array_column($otrasVentas, "fecha_venta");
+                rsort($fechas);
+                $ultimaFecha = $fechas[0];
+            }
+        }
+        ModeloClientes::mdlActualizarCliente("clientes", "ultima_compra", $ultimaFecha, $idCliente);
+    }
+    
+    return true;
+}
+
+/*=============================================
+ELIMINAR VENTA (PARA AJAX - VERSIÓN FINAL)
+=============================================*/
+static public function ctrEliminarVentaAjax($idVenta){
+    self::_revertirCambiosVenta($idVenta);
+    $respuesta = ModeloVentas::mdlEliminarVenta("ventas", $idVenta);
+    echo $respuesta;
+}
+
+/*=============================================
+ELIMINAR VENTA (PARA RECARGA DE PÁGINA - VERSIÓN FINAL)
+=============================================*/
+static public function ctrEliminarVenta() {
+    if (isset($_GET["idVenta"])) {
+        self::_revertirCambiosVenta($_GET["idVenta"]);
+        $respuesta = ModeloVentas::mdlEliminarVenta("ventas", $_GET["idVenta"]);
+        if ($respuesta === "ok") {
+            echo '<script>
+                swal({
+                    type: "success",
+                    title: "La venta ha sido borrada correctamente",
+                    showConfirmButton: true,
+                    confirmButtonText: "Cerrar"
+                }).then(function(result){
+                    if (result.value) {
+                        window.location = "ventas";
+                    }
+                });
+            </script>';
+        }
+    }
+}
     
     /*=============================================
     DESCARGAR XML (estructura básica estilo DIAN)
@@ -441,20 +500,26 @@ static public function ctrCrearVenta() {
         return $respuesta;
     }
     
-    /*=============================================
-    SUMAR TOTAL DE VENTAS (GENERAL) (CORREGIDO)
-    =============================================*/
-    static public function ctrSumaTotalVentasGeneral($fechaInicial, $fechaFinal){
-        $tabla = "ventas";
-        $respuesta = ModeloVentas::mdlSumaTotalVentasGeneral($tabla, $fechaInicial, $fechaFinal);
-    
-        // Se asegura de devolver 0 si no hay resultados
-        if(!$respuesta){
-            return ["total_ventas" => 0];
-        }
-    
-        return $respuesta;
-    }
+/*=============================================
+SUMAR TOTAL DE VENTAS (GENERAL) (LÓGICA CORREGIDA)
+=============================================*/
+static public function ctrSumaTotalVentasGeneral($fechaInicial, $fechaFinal){
+
+    // Para asegurar la consistencia, el Total Vendido SIEMPRE será
+    // la suma de lo que ha entrado más lo que está pendiente por cobrar.
+
+    // 1. Obtenemos el total de entradas (dinero recibido)
+    $totalEntradas = ControladorContabilidad::ctrSumaTotalEntradas($fechaInicial, $fechaFinal);
+
+    // 2. Obtenemos el total de la deuda (dinero por cobrar)
+    $totalDeuda = ControladorVentas::ctrSumaTotalDeuda($fechaInicial, $fechaFinal);
+
+    // 3. Calculamos el total vendido sumando los dos valores anteriores
+    $totalVendidoCalculado = ($totalEntradas["total"] ?? 0) + ($totalDeuda["total_deuda"] ?? 0);
+
+    // 4. Devolvemos el resultado en el formato que el resto del sistema espera
+    return array("total_ventas" => $totalVendidoCalculado);
+}
     /*=============================================
     DESCARGAR REPORTE EN EXCEL (CORREGIDO)
     =============================================*/

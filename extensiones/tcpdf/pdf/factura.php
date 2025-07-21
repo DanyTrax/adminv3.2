@@ -77,9 +77,9 @@ class imprimirFactura
                 $tikcorreo = "creativo@epicosiempremas.com";
             } else {
                 $tikempresa = "ACPLASTICOS";
-                $tiknumero = "316 049 6374 / 322 744 56 31";
-                $tikdirecc = "CARRERA 19 # 66A - 49 BARRIO 7 DE AGOSTO";
-                $tikcorreo = "ventas1@acplasticos.com";
+    			$tiknumero = "305 3177135 / 322 744 5631";
+    			$tikdirecc = "CARRERA 27 # 10-65 local 116";
+    			$tikcorreo = "ventas1@acplasticos.com";
             }
         }
 		
@@ -116,7 +116,7 @@ class imprimirFactura
 
 		$pdf->setPrintHeader(false);
 		$pdf->setPrintFooter(false);
-		$pdf->SetMargins(0, 0, 0, 0);
+		$pdf->SetMargins(4, 0, 0, 0);
 		$pdf->SetFooterMargin(0);
 		$pdf->SetAutoPageBreak(true, 0); // Modificado para evitar saltos de p¨¢gina autom¨¢ticos no deseados
 
